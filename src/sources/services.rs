@@ -6,7 +6,7 @@ use windows::Win32::System::Services::{
     ChangeServiceConfigW, CloseServiceHandle, EnumServicesStatusExW, OpenSCManagerW, OpenServiceW,
     QueryServiceConfigW, ENUM_SERVICE_STATUS_PROCESSW, ENUM_SERVICE_TYPE, QUERY_SERVICE_CONFIGW,
     SC_ENUM_PROCESS_INFO, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_AUTO_START, SERVICE_BOOT_START,
-    SERVICE_CHANGE_CONFIG, SERVICE_DEMAND_START, SERVICE_ERROR, SERVICE_NO_CHANGE,
+    SERVICE_CHANGE_CONFIG, SERVICE_DISABLED, SERVICE_ERROR, SERVICE_NO_CHANGE,
     SERVICE_QUERY_CONFIG, SERVICE_STATE_ALL, SERVICE_SYSTEM_START, SERVICE_WIN32,
 };
 
@@ -144,17 +144,20 @@ impl StartupSource for ServicesScanner {
 
                 let config = &*(config_buffer.as_ptr() as *const QUERY_SERVICE_CONFIGW);
 
-                // Only include auto-start services
+                // Include auto-start services and disabled services
                 let start_type = config.dwStartType;
-                if start_type != SERVICE_AUTO_START
-                    && start_type != SERVICE_BOOT_START
-                    && start_type != SERVICE_SYSTEM_START
+                let status = if start_type == SERVICE_AUTO_START
+                    || start_type == SERVICE_BOOT_START
+                    || start_type == SERVICE_SYSTEM_START
                 {
+                    ItemStatus::Enabled
+                } else if start_type == SERVICE_DISABLED {
+                    ItemStatus::Disabled
+                } else {
+                    // Skip demand-start and other non-startup services
                     let _ = CloseServiceHandle(service_handle);
                     continue;
-                }
-
-                let status = ItemStatus::Enabled;
+                };
                 let binary_path = Self::pwstr_to_string(config.lpBinaryPathName);
 
                 let item = StartupItem::new(
@@ -241,7 +244,7 @@ impl StartupSource for ServicesScanner {
             let result = ChangeServiceConfigW(
                 service_handle,
                 ENUM_SERVICE_TYPE(SERVICE_NO_CHANGE),
-                SERVICE_DEMAND_START,
+                SERVICE_DISABLED,
                 SERVICE_ERROR(SERVICE_NO_CHANGE),
                 PCWSTR::null(),
                 PCWSTR::null(),

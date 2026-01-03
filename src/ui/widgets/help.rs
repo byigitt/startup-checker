@@ -1,56 +1,73 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
+    symbols::border,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
-use crate::ui::Theme;
+use crate::ui::{Icons, Theme};
 
 pub fn render_help(frame: &mut Frame, area: Rect) {
     // Center the help dialog
-    let popup_area = centered_rect(60, 70, area);
+    let popup_area = centered_rect(55, 65, area);
 
     // Clear the background
     frame.render_widget(Clear, popup_area);
 
-    let help_text = vec![
-        ("Navigation", vec![
-            ("↑/k", "Move up"),
-            ("↓/j", "Move down"),
-            ("Home", "Go to first item"),
-            ("End", "Go to last item"),
-        ]),
-        ("Actions", vec![
-            ("Space", "Toggle enable/disable"),
-            ("Tab", "Collapse/expand group"),
-            ("Enter", "Show item details"),
-            ("a", "Apply pending changes"),
-            ("u", "Undo pending changes"),
-        ]),
-        ("Other", vec![
-            ("r", "Refresh list"),
-            ("b", "Create backup"),
-            ("?", "Toggle help"),
-            ("q/Esc", "Quit"),
-        ]),
+    let help_sections = vec![
+        (
+            "Navigation",
+            vec![
+                ("↑  k", "Move up"),
+                ("↓  j", "Move down"),
+                ("Home", "Jump to first"),
+                ("End", "Jump to last"),
+            ],
+        ),
+        (
+            "Actions",
+            vec![
+                ("Space", "Toggle item"),
+                ("Tab", "Expand/collapse"),
+                ("a", "Apply changes"),
+                ("u", "Undo pending"),
+            ],
+        ),
+        (
+            "Other",
+            vec![
+                ("r", "Refresh list"),
+                ("b", "Create backup"),
+                ("?", "Toggle help"),
+                ("q", "Quit app"),
+            ],
+        ),
     ];
 
     let mut lines = vec![
-        Line::from(Span::styled("Keyboard Shortcuts", Theme::help_title())),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(format!("  {} ", Icons::LOGO), Theme::logo()),
+            Span::styled("Keyboard Shortcuts", Theme::help_title()),
+        ]),
         Line::from(""),
     ];
 
-    for (section, bindings) in help_text {
-        lines.push(Line::from(Span::styled(
-            format!("─── {} ───", section),
-            Theme::group_header(),
-        )));
+    for (section, bindings) in help_sections {
+        // Section header with modern styling
+        lines.push(Line::from(vec![
+            Span::styled("  ", Theme::help_section()),
+            Span::styled(format!("─── {} ", section), Theme::help_section()),
+            Span::styled("───────────────────", Theme::border_dim()),
+        ]));
+        lines.push(Line::from(""));
 
         for (key, description) in bindings {
             lines.push(Line::from(vec![
+                Span::raw("    "),
+                Span::styled(format!(" {} ", key), Theme::status_key()),
                 Span::raw("  "),
-                Span::styled(format!("{:12}", key), Theme::help_key()),
                 Span::styled(description, Theme::help_description()),
             ]));
         }
@@ -58,17 +75,48 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         lines.push(Line::from(""));
     }
 
-    lines.push(Line::from(Span::styled(
-        "Press ? or Esc to close",
-        Theme::info(),
-    )));
+    // Color legend
+    lines.push(Line::from(vec![
+        Span::styled("  ", Theme::help_section()),
+        Span::styled("─── Colors ", Theme::help_section()),
+        Span::styled("────────────────────", Theme::border_dim()),
+    ]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::raw("    "),
+        Span::styled(Icons::ENABLED, Theme::item_enabled()),
+        Span::styled(" Green", Theme::item_enabled()),
+        Span::styled("  Enabled", Theme::help_description()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw("    "),
+        Span::styled(Icons::ADMIN, Theme::icon_admin()),
+        Span::styled(" Yellow", Theme::icon_admin()),
+        Span::styled(" Needs Admin", Theme::help_description()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw("    "),
+        Span::styled(Icons::MISSING, Theme::icon_missing()),
+        Span::styled(" Red", Theme::icon_missing()),
+        Span::styled("    Missing file", Theme::help_description()),
+    ]));
+    lines.push(Line::from(""));
+
+    // Footer
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("  Press {} or Esc to close", "?"),
+            Theme::detail_muted(),
+        ),
+    ]));
 
     let paragraph = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
+            .border_set(border::ROUNDED)
             .border_style(Theme::border_focused())
-            .title(" Help ")
-            .title_style(Theme::header()),
+            .title(format!(" {} Help ", Icons::INFO))
+            .title_style(Theme::help_title()),
     );
 
     frame.render_widget(paragraph, popup_area);

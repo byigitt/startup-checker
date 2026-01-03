@@ -5,4 +5,4 @@ mod widgets;
 
 pub use app::run_app;
 pub use state::{AppState, DisplayItem, ViewMode};
-pub use theme::Theme;
+pub use theme::{Borders, Icons, Theme};

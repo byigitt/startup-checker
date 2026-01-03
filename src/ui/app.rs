@@ -9,6 +9,7 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
+    symbols::border,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame, Terminal,
@@ -20,7 +21,7 @@ use crate::operations::create_backup;
 use crate::sources::{modify_item, scan_all_sources};
 use crate::ui::state::MessageType;
 use crate::ui::widgets::{render_help, render_list, render_status_bar};
-use crate::ui::{AppState, Theme, ViewMode};
+use crate::ui::{AppState, Icons, Theme, ViewMode};
 
 pub fn run_app(items: Vec<StartupItem>) -> Result<()> {
     // Setup terminal
@@ -77,7 +78,7 @@ fn run_loop(
                         KeyCode::Char('q') | KeyCode::Esc => {
                             if state.has_pending_changes() {
                                 state.set_message(
-                                    "Pending changes! Press 'a' to apply or 'u' to undo, then 'q' to quit".to_string(),
+                                    format!("{} Pending changes! Press 'a' to apply or 'u' to undo", Icons::MISSING),
                                     MessageType::Warning,
                                 );
                             } else {
@@ -108,7 +109,7 @@ fn run_loop(
                         }
                         KeyCode::Char('u') => {
                             state.clear_pending_changes();
-                            state.set_message("Pending changes discarded".to_string(), MessageType::Info);
+                            state.set_message(format!("{} Pending changes discarded", Icons::CHECK), MessageType::Info);
                         }
                         KeyCode::Char('r') => {
                             refresh(state);
@@ -142,13 +143,13 @@ fn run_loop(
 fn render_ui(frame: &mut Frame, state: &mut AppState) {
     let size = frame.area();
 
-    // Layout: Header, Main content, Details (optional), Status bar
+    // Modern layout with better spacing
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),  // Header
             Constraint::Min(10),    // Main list
-            Constraint::Length(5),  // Details
+            Constraint::Length(6),  // Details
             Constraint::Length(1),  // Status bar
         ])
         .split(size);
@@ -172,24 +173,39 @@ fn render_ui(frame: &mut Frame, state: &mut AppState) {
 }
 
 fn render_header(frame: &mut Frame, area: Rect, state: &AppState) {
-    let admin_status = if state.is_admin {
-        Span::styled("[Admin: Yes]", Theme::header_admin())
+    let admin_indicator = if state.is_admin {
+        vec![
+            Span::styled(" ", Theme::header_admin()),
+            Span::styled(Icons::CHECK, Theme::header_admin()),
+            Span::styled(" Admin ", Theme::header_admin()),
+        ]
     } else {
-        Span::styled("[Admin: No]", Theme::header_no_admin())
+        vec![
+            Span::styled(" ", Theme::header_no_admin()),
+            Span::styled(Icons::CROSS, Theme::header_no_admin()),
+            Span::styled(" User ", Theme::header_no_admin()),
+        ]
     };
 
-    let title = Line::from(vec![
-        Span::styled(" Startup Manager v", Theme::header()),
-        Span::styled(env!("CARGO_PKG_VERSION"), Theme::header()),
+    let title_spans = vec![
+        Span::styled(format!(" {} ", Icons::LOGO), Theme::logo()),
+        Span::styled("Startup Manager", Theme::header()),
+        Span::styled(format!(" v{}", env!("CARGO_PKG_VERSION")), Theme::version()),
         Span::raw("  "),
-        admin_status,
-    ]);
+    ];
 
-    let header = Paragraph::new(title).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Theme::border()),
-    );
+    let mut all_spans = title_spans;
+    all_spans.extend(admin_indicator);
+
+    let title = Line::from(all_spans);
+
+    let header = Paragraph::new(title)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_set(border::ROUNDED)
+                .border_style(Theme::border()),
+        );
 
     frame.render_widget(header, area);
 }
@@ -199,61 +215,75 @@ fn render_details(frame: &mut Frame, area: Rect, state: &AppState) {
         let status = state.get_effective_status(item);
         let has_pending = state.pending_changes.contains_key(&item.id);
 
+        let status_icon = if status.is_enabled() { Icons::ENABLED } else { Icons::DISABLED };
+        let status_style = if status.is_enabled() { Theme::item_enabled() } else { Theme::item_disabled() };
+
         vec![
             Line::from(vec![
-                Span::styled("Name: ", Theme::detail_label()),
+                Span::styled("  Name     ", Theme::detail_label()),
                 Span::styled(&item.name, Theme::detail_value()),
                 if has_pending {
-                    Span::styled(" (modified)", Theme::warning())
+                    Span::styled(format!("  {} modified", Icons::MODIFIED), Theme::item_pending())
                 } else {
                     Span::raw("")
                 },
             ]),
             Line::from(vec![
-                Span::styled("Command: ", Theme::detail_label()),
-                Span::styled(item.display_command(), Theme::detail_value()),
+                Span::styled("  Command  ", Theme::detail_label()),
+                Span::styled(truncate_str(&item.display_command(), area.width.saturating_sub(14) as usize), Theme::detail_muted()),
             ]),
             Line::from(vec![
-                Span::styled("Status: ", Theme::detail_label()),
-                Span::styled(
-                    status.display(),
-                    if status.is_enabled() {
-                        Theme::item_enabled()
-                    } else {
-                        Theme::item_disabled()
-                    },
-                ),
-                Span::raw(" | "),
-                Span::styled("Source: ", Theme::detail_label()),
+                Span::styled("  Status   ", Theme::detail_label()),
+                Span::styled(format!("{} ", status_icon), status_style),
+                Span::styled(status.display(), status_style),
+                Span::styled(format!("  {}  Source  ", Icons::SEPARATOR), Theme::detail_muted()),
                 Span::styled(item.source.short_name(), Theme::detail_value()),
                 if item.requires_admin {
-                    Span::styled(" | Requires Admin", Theme::warning())
+                    Span::styled(format!("  {} Requires Admin", Icons::ADMIN), Theme::icon_admin())
                 } else {
                     Span::raw("")
                 },
+            ]),
+            Line::from(vec![
+                Span::styled("  Location ", Theme::detail_label()),
+                Span::styled(truncate_str(&item.source_location, area.width.saturating_sub(14) as usize), Theme::detail_muted()),
             ]),
         ]
     } else {
-        vec![Line::from(Span::styled(
-            "Select an item to see details",
-            Theme::info(),
-        ))]
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("  {} Select an item to see details", Icons::INFO),
+                Theme::detail_muted(),
+            )),
+        ]
     };
 
     let details = Paragraph::new(content).block(
         Block::default()
             .borders(Borders::ALL)
+            .border_set(border::ROUNDED)
             .border_style(Theme::border())
-            .title(" Details ")
-            .title_style(Theme::header()),
+            .title(format!(" {} Details ", Icons::INFO))
+            .title_style(Theme::detail_label()),
     );
 
     frame.render_widget(details, area);
 }
 
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else if max_len > 3 {
+        format!("{}...", &s[..max_len - 3])
+    } else {
+        s[..max_len].to_string()
+    }
+}
+
 fn apply_changes(state: &mut AppState) {
     if !state.has_pending_changes() {
-        state.set_message("No pending changes to apply".to_string(), MessageType::Info);
+        state.set_message(format!("{} No pending changes to apply", Icons::INFO), MessageType::Info);
         return;
     }
 
@@ -272,7 +302,7 @@ fn apply_changes(state: &mut AppState) {
 
     if let Err(e) = create_backup(&all_items, Some("Before applying changes".to_string())) {
         state.set_message(
-            format!("Backup failed: {}. Aborting.", e),
+            format!("{} Backup failed: {}. Aborting.", Icons::CROSS, e),
             MessageType::Error,
         );
         return;
@@ -292,7 +322,6 @@ fn apply_changes(state: &mut AppState) {
                 Ok(()) => success += 1,
                 Err(e) => {
                     failed += 1;
-                    // Log error but continue
                     eprintln!("Failed to modify {}: {}", item.name, e);
                 }
             }
@@ -304,12 +333,12 @@ fn apply_changes(state: &mut AppState) {
 
     if failed == 0 {
         state.set_message(
-            format!("Applied {} changes successfully", success),
+            format!("{} Applied {} changes successfully", Icons::CHECK, success),
             MessageType::Success,
         );
     } else {
         state.set_message(
-            format!("Applied {}/{} changes ({} failed)", success, total, failed),
+            format!("{} Applied {}/{} changes ({} failed)", Icons::MISSING, success, total, failed),
             MessageType::Warning,
         );
     }
@@ -318,7 +347,7 @@ fn apply_changes(state: &mut AppState) {
 fn refresh(state: &mut AppState) {
     let items = scan_all_sources();
     state.refresh(items);
-    state.set_message("Refreshed".to_string(), MessageType::Info);
+    state.set_message(format!("{} Refreshed", Icons::CHECK), MessageType::Info);
 }
 
 fn create_backup_action(state: &mut AppState) {
@@ -332,12 +361,12 @@ fn create_backup_action(state: &mut AppState) {
     match create_backup(&all_items, Some("Manual backup".to_string())) {
         Ok(path) => {
             state.set_message(
-                format!("Backup created: {}", path.file_name().unwrap_or_default().to_string_lossy()),
+                format!("{} Backup created: {}", Icons::CHECK, path.file_name().unwrap_or_default().to_string_lossy()),
                 MessageType::Success,
             );
         }
         Err(e) => {
-            state.set_message(format!("Backup failed: {}", e), MessageType::Error);
+            state.set_message(format!("{} Backup failed: {}", Icons::CROSS, e), MessageType::Error);
         }
     }
 }
